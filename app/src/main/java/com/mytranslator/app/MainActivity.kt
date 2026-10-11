@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.*
@@ -50,8 +51,15 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         if (req == REQ_PROJ && res == Activity.RESULT_OK && data != null) {
-            FloatingTranslateService.mediaProjection = mgr.getMediaProjection(res, data)
-            startService(Intent(this, FloatingTranslateService::class.java))
+            val svcIntent = Intent(this, FloatingTranslateService::class.java).apply {
+                putExtra("code", res)
+                putExtra("data", data)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svcIntent)
+            } else {
+                startService(svcIntent)
+            }
             Toast.makeText(this, "悬浮球已启动！返回游戏即可使用", Toast.LENGTH_LONG).show()
             moveTaskToBack(true)
         }

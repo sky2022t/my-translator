@@ -1,19 +1,22 @@
 package com.mytranslator.app
 
-import android.app.Service
+import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.*
 import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.IBinder
 import android.view.*
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.app.NotificationCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -25,15 +28,45 @@ class FloatingTranslateService : Service() {
     private var overlay: FrameLayout? = null
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-
-    companion object { var mediaProjection: MediaProjection? = null }
+    private var proj: MediaProjection? = null
 
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        startForegroundNotification()
         initBall()
+    }
+
+    private fun startForegroundNotification() {
+        val channelId = "translate_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val chan = NotificationChannel(channelId, "悬浮翻译服务", NotificationManager.IMPORTANCE_LOW)
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(chan)
+        }
+        val notif = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("悬浮翻译正在运行")
+            .setContentText("点击屏幕上的悬浮球进行翻译")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1001, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(1001, notif)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val code = intent?.getIntExtra("code", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
+        val data = intent?.getParcelableExtra<Intent>("data")
+        if (code == Activity.RESULT_OK && data != null) {
+            val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            proj = mgr.getMediaProjection(code, data)
+        }
+        return START_NOT_STICKY
     }
 
     private fun initBall() {
@@ -63,29 +96,38 @@ class FloatingTranslateService : Service() {
     }
 
     private fun capture() {
-        val proj = mediaProjection ?: run {
-            Toast.makeText(this, "请在 App 中授权截屏", Toast.LENGTH_SHORT).show(); return
+        val p = proj ?: run {
+            Toast.makeText(this, "截屏权限未就绪，请在App内重新授权", Toast.LENGTH_SHORT).show(); return
         }
         clear()
         btn.text = "..."
-        val m = resources.displayMetrics
-        val ir = ImageReader.newInstance(m.widthPixels, m.heightPixels, PixelFormat.RGBA_8888, 2)
-        val vd = proj.createVirtualDisplay("Cap", m.widthPixels, m.heightPixels, m.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir.surface, null, null)
+        try {
+            val m = resources.displayMetrics
+            val ir = ImageReader.newInstance(m.widthPixels, m.heightPixels, PixelFormat.RGBA_8888, 2)
+            val vd = p.createVirtualDisplay("Cap", m.widthPixels, m.heightPixels, m.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir.surface, null, null)
 
-        scope.launch {
-            delay(300)
-            val img = ir.acquireLatestImage()
-            if (img == null) { btn.text = "译"; vd.release(); return@launch }
-            val bmp = imgToBmp(img); img.close(); vd.release()
-            recognizer.process(InputImage.fromBitmap(bmp, 0)).addOnSuccessListener { res ->
-                scope.launch { render(bmp, res.textBlocks); btn.text = "译" }
-            }.addOnFailureListener { btn.text = "译" }
+            scope.launch {
+                delay(300)
+                val img = ir.acquireLatestImage()
+                if (img == null) { btn.text = "译"; vd.release(); return@launch }
+                val bmp = imgToBmp(img); img.close(); vd.release()
+
+                recognizer.process(InputImage.fromBitmap(bmp, 0)).addOnSuccessListener { res ->
+                    scope.launch { render(bmp, res.textBlocks); btn.text = "译" }
+                }.addOnFailureListener {
+                    btn.text = "译"
+                    Toast.makeText(this@FloatingTranslateService, "识别失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            btn.text = "译"
+            Toast.makeText(this, "截屏异常: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
     private suspend fun render(bmp: Bitmap, blocks: List<com.google.mlkit.vision.text.Text.TextBlock>) {
-        if (blocks.isEmpty()) { Toast.makeText(this, "未检测到文字", Toast.LENGTH_SHORT).show(); return }
+        if (blocks.isEmpty()) { Toast.makeText(this, "未检测到外语文字", Toast.LENGTH_SHORT).show(); return }
         val c = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT); setOnClickListener { clear() } }
         overlay = c
         for (b in blocks) {
