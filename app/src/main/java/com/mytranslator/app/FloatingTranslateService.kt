@@ -18,9 +18,9 @@ import android.util.TypedValue
 import android.view.*
 import android.widget.FrameLayout
 import android.widget.Toast
-import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.NotificationCompat
+import androidx.core.widget.TextViewCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -28,15 +28,15 @@ import kotlinx.coroutines.*
 
 class FloatingTranslateService : Service() {
     private lateinit var wm: WindowManager
-    private lateinit var btn: AppCompatButton
+    private lateinit var sunBtn: SunFloatingView
     private var overlay: FrameLayout? = null
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
 
     private var proj: MediaProjection? = null
-    private var imageReader: ImageReader? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var screenW = 0; private var screenH = 0
+    private var reader: ImageReader? = null
+    private var vd: VirtualDisplay? = null
+    private var sw = 0; private var sh = 0
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -45,20 +45,20 @@ class FloatingTranslateService : Service() {
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val dm = DisplayMetrics()
         wm.defaultDisplay.getRealMetrics(dm)
-        screenW = dm.widthPixels; screenH = dm.heightPixels
+        sw = dm.widthPixels; sh = dm.heightPixels
         startForegroundNotification()
-        initBall()
+        initSunButton()
     }
 
     private fun startForegroundNotification() {
-        val cid = "trans_channel"
+        val cid = "sun_trans"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val c = NotificationChannel(cid, "翻译服务", NotificationManager.IMPORTANCE_LOW)
+            val c = NotificationChannel(cid, "小太阳翻译官", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(c)
         }
         val notif = NotificationCompat.Builder(this, cid)
-            .setContentTitle("悬浮翻译已就绪")
-            .setContentText("点击屏幕上的『译』悬浮球即可翻译")
+            .setContentTitle("小太阳翻译官正在值班 ☀️")
+            .setContentText("点击屏幕上的小太阳即可一键翻译")
             .setSmallIcon(android.R.drawable.ic_menu_search)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -82,78 +82,80 @@ class FloatingTranslateService : Service() {
     private fun initCapture() {
         val p = proj ?: return
         val dm = resources.displayMetrics
-        imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 3)
-        virtualDisplay = p.createVirtualDisplay("PersistentCap", screenW, screenH, dm.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader!!.surface, null, null)
+        reader = ImageReader.newInstance(sw, sh, PixelFormat.RGBA_8888, 3)
+        vd = p.createVirtualDisplay("SunCap", sw, sh, dm.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, null)
     }
 
-    private fun initBall() {
-        btn = AppCompatButton(this).apply {
-            text = "译"; textSize = 15f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#E6007AFF")) }
-        }
+    private fun initSunButton() {
+        sunBtn = SunFloatingView(this)
         val p = WindowManager.LayoutParams(
-            130, 130, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            150, 150, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = 40; y = 500 }
+        ).apply { gravity = Gravity.TOP or Gravity.START; x = 40; y = 600 }
 
         var sx = 0; var sy = 0; var tx = 0f; var ty = 0f; var moved = false
-        btn.setOnTouchListener { _, e ->
+        sunBtn.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> { sx = p.x; sy = p.y; tx = e.rawX; ty = e.rawY; moved = false; true }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (e.rawX - tx).toInt(); val dy = (e.rawY - ty).toInt()
-                    if (Math.abs(dx) > 12 || Math.abs(dy) > 12) moved = true
-                    p.x = sx + dx; p.y = sy + dy; wm.updateViewLayout(btn, p); true
+                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true
+                    p.x = sx + dx; p.y = sy + dy; wm.updateViewLayout(sunBtn, p); true
                 }
                 MotionEvent.ACTION_UP -> { if (!moved) capture(); true }
                 else -> false
             }
         }
-        wm.addView(btn, p)
+        wm.addView(sunBtn, p)
     }
 
     private fun capture() {
-        val reader = imageReader ?: run {
-            Toast.makeText(this, "服务未准备好，请重新授权", Toast.LENGTH_SHORT).show(); return
-        }
+        val r = reader ?: run { Toast.makeText(this, "服务未准备好，请重新授权", Toast.LENGTH_SHORT).show(); return }
         clear()
-        btn.text = "..."
+        sunBtn.isTranslating = true
         scope.launch {
             delay(150)
-            val img = reader.acquireLatestImage()
-            if (img == null) { btn.text = "译"; return@launch }
+            val img = r.acquireLatestImage()
+            if (img == null) { sunBtn.isTranslating = false; return@launch }
             val bmp = imgToBmp(img); img.close()
             recognizer.process(InputImage.fromBitmap(bmp, 0)).addOnSuccessListener { res ->
-                scope.launch { render(bmp, res.textBlocks); btn.text = "译" }
-            }.addOnFailureListener { btn.text = "译" }
+                scope.launch { render(bmp, res.textBlocks); sunBtn.isTranslating = false }
+            }.addOnFailureListener {
+                sunBtn.isTranslating = false
+                Toast.makeText(this@FloatingTranslateService, "OCR 识别失败", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private suspend fun render(bmp: Bitmap, blocks: List<com.google.mlkit.vision.text.Text.TextBlock>) {
-        if (blocks.isEmpty()) { Toast.makeText(this, "未检测到文字", Toast.LENGTH_SHORT).show(); return }
+        if (blocks.isEmpty()) { Toast.makeText(this, "未发现可翻译的文字", Toast.LENGTH_SHORT).show(); return }
         val c = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT); setOnClickListener { clear() } }
         overlay = c
         for (b in blocks) {
-            val r = b.boundingBox ?: continue
-            if (r.width() <= 20 || r.height() <= 20) continue
+            val rect = b.boundingBox ?: continue
+            if (rect.width() <= 20 || rect.height() <= 20) continue
             val txt = TranslateEngine.googleTranslate(b.text)
             if (txt.isEmpty()) continue
-            val bg = TranslateEngine.extractBackgroundColor(bmp, r)
-            val tc = TranslateEngine.getTextColor(bg)
+            val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rect)
+            val tc = TranslateEngine.getHighContrastTextColor(bg)
             val tv = AppCompatTextView(this).apply {
-                text = txt; setTextColor(tc); setPadding(10, 6, 10, 6); gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+                text = txt; setTextColor(tc); setPadding(12, 8, 12, 8); gravity = Gravity.CENTER
                 background = GradientDrawable().apply { cornerRadius = 8f; setColor(bg) }
+                TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(this, 8, 18, 1, TypedValue.COMPLEX_UNIT_SP)
             }
-            c.addView(tv, FrameLayout.LayoutParams(r.width(), r.height()).apply { leftMargin = r.left; topMargin = r.top })
+            c.addView(tv, FrameLayout.LayoutParams(rect.width(), rect.height()).apply { leftMargin = rect.left; topMargin = rect.top })
         }
-        wm.addView(c, WindowManager.LayoutParams(
+        val op = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
-        ))
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START; x = 0; y = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        wm.addView(c, op)
     }
 
     private fun clear() { overlay?.let { try { wm.removeView(it) } catch (e: Exception) {}; overlay = null } }
@@ -167,7 +169,7 @@ class FloatingTranslateService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        clear(); try { wm.removeView(btn) } catch (e: Exception) {}
-        virtualDisplay?.release(); imageReader?.close(); scope.cancel()
+        clear(); try { wm.removeView(sunBtn) } catch (e: Exception) {}
+        vd?.release(); reader?.close(); scope.cancel()
     }
 }

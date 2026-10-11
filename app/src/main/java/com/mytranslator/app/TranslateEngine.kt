@@ -11,28 +11,16 @@ import java.net.URL
 import java.net.URLEncoder
 
 object TranslateEngine {
-    fun extractBackgroundColor(bitmap: Bitmap, rect: Rect): Int {
-        val samples = mutableListOf<Int>()
-        val w = bitmap.width; val h = bitmap.height
-        val points = listOf(
-            Pair(rect.left.coerceIn(0, w - 1), rect.top.coerceIn(0, h - 1)),
-            Pair((rect.right - 1).coerceIn(0, w - 1), rect.top.coerceIn(0, h - 1)),
-            Pair(rect.left.coerceIn(0, w - 1), (rect.bottom - 1).coerceIn(0, h - 1)),
-            Pair((rect.right - 1).coerceIn(0, w - 1), (rect.bottom - 1).coerceIn(0, h - 1)),
-            Pair(rect.centerX().coerceIn(0, w - 1), rect.top.coerceIn(0, h - 1)),
-            Pair(rect.centerX().coerceIn(0, w - 1), (rect.bottom - 1).coerceIn(0, h - 1))
-        )
-        for ((x, y) in points) {
-            val c = bitmap.getPixel(x, y)
-            if (Color.alpha(c) > 100) samples.add(c)
-        }
-        if (samples.isEmpty()) return Color.parseColor("#E6121212")
-        return samples.groupBy { it }.maxByOrNull { it.value.size }?.key ?: samples[0]
+    fun extractSolidBackgroundColor(bitmap: Bitmap, rect: Rect): Int {
+        val px = rect.left.coerceIn(0, bitmap.width - 1)
+        val py = rect.top.coerceIn(0, bitmap.height - 1)
+        val c = bitmap.getPixel(px, py)
+        return Color.rgb(Color.red(c), Color.green(c), Color.blue(c))
     }
 
-    fun getTextColor(bgColor: Int): Int {
+    fun getHighContrastTextColor(bgColor: Int): Int {
         val lum = (0.299 * Color.red(bgColor) + 0.587 * Color.green(bgColor) + 0.114 * Color.blue(bgColor)) / 255
-        return if (lum > 0.5) Color.BLACK else Color.WHITE
+        return if (lum > 0.55) Color.parseColor("#1A1A1A") else Color.WHITE
     }
 
     suspend fun googleTranslate(text: String): String = withContext(Dispatchers.IO) {
