@@ -20,7 +20,6 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.NotificationCompat
-import androidx.core.widget.TextViewCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -57,7 +56,7 @@ class FloatingTranslateService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(c)
         }
         val notif = NotificationCompat.Builder(this, cid)
-            .setContentTitle("小太阳翻译官正在值班 ☀️")
+            .setContentTitle("小太阳翻译官已就绪 ☀️")
             .setContentText("点击屏幕上的小太阳即可一键翻译")
             .setSmallIcon(android.R.drawable.ic_menu_search)
             .build()
@@ -134,15 +133,25 @@ class FloatingTranslateService : Service() {
         overlay = c
         for (b in blocks) {
             val rect = b.boundingBox ?: continue
-            if (rect.width() <= 20 || rect.height() <= 20) continue
+            if (rect.width() <= 15 || rect.height() <= 15) continue
             val txt = TranslateEngine.googleTranslate(b.text)
             if (txt.isEmpty()) continue
             val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rect)
             val tc = TranslateEngine.getHighContrastTextColor(bg)
+
+            // 1:1 原文字号物理锚定
+            val lineHeights = b.lines.mapNotNull { it.boundingBox?.height() }.filter { it > 0 }
+            val avgLineHeight = if (lineHeights.isNotEmpty()) lineHeights.average().toFloat() else rect.height().toFloat()
+            val matchedSize = (avgLineHeight * 0.72f).coerceIn(22f, 68f)
+            val isSingle = b.lines.size <= 1
+
             val tv = AppCompatTextView(this).apply {
-                text = txt; setTextColor(tc); setPadding(12, 8, 12, 8); gravity = Gravity.CENTER
-                background = GradientDrawable().apply { cornerRadius = 8f; setColor(bg) }
-                TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(this, 8, 18, 1, TypedValue.COMPLEX_UNIT_SP)
+                text = txt; setTextColor(tc)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, matchedSize)
+                setLineSpacing(4f, 1.15f)
+                gravity = if (isSingle) Gravity.CENTER else (Gravity.START or Gravity.TOP)
+                setPadding(8, 4, 8, 4)
+                background = GradientDrawable().apply { cornerRadius = 6f; setColor(bg) }
             }
             c.addView(tv, FrameLayout.LayoutParams(rect.width(), rect.height()).apply { leftMargin = rect.left; topMargin = rect.top })
         }

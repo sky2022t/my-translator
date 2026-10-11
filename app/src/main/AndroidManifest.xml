@@ -7,7 +7,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="悬浮翻译"
+        android:icon="@drawable/ic_launcher_sun"
+        android:roundIcon="@drawable/ic_launcher_sun"
+        android:label="小太阳翻译"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
