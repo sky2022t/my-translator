@@ -17,16 +17,20 @@ import java.net.URLEncoder
 
 object TranslateEngine {
 
-    // 1. 杂质过滤器：清除无意义分隔符、超细长虚线与标点
-    fun isGarbageNoise(text: String, rect: Rect): Boolean {
+    // 1. 杂质过滤器：清除无意义分隔符、超细长虚线、标点以及屏幕底部的浏览器地址栏噪点
+    fun isGarbageNoise(text: String, rect: Rect, screenH: Int): Boolean {
         val clean = text.trim()
         if (clean.length <= 1 && !clean.any { it.isLetterOrDigit() }) return true
         if (rect.width() < 12 || rect.height() < 10) return true
         if (clean.matches(Regex("^[\\-_|/\\\\.,:;!?'\"\\s\\[\\]{}()<>v^]+$"))) return true
+        // 过滤底部浏览器导航栏/网址识别残留
+        if (rect.bottom > screenH - 140 && (clean.contains(".goog") || clean.contains("http") || clean.contains(".com") || clean.contains("tidbits]"))) {
+            return true
+        }
         return false
     }
 
-    // 2. 标点净化器：移除标题、按钮、UI组件末尾生硬的句号（如“热带花絮。”->“热带花絮”）
+    // 2. 标点净化器：移除 UI、卡片、标题末尾生硬的句号与分号
     fun cleanUiPunctuation(text: String, isShortUi: Boolean): String {
         var res = text.trim()
         if (isShortUi) {
@@ -35,7 +39,7 @@ object TranslateEngine {
         return res
     }
 
-    // 3. 边缘环带采样提取纯净背景色
+    // 3. 环带边缘采样提取纯净背景色
     fun extractSolidBackgroundColor(bitmap: Bitmap, rect: Rect): Int {
         val w = bitmap.width; val h = bitmap.height
         val samples = mutableListOf<Int>()
@@ -62,51 +66,74 @@ object TranslateEngine {
         return if (lum > 0.52) Color.parseColor("#111111") else Color.WHITE
     }
 
-    // 5. 进阶排版测算：黄金高度比例测算 + 图表细微自适应
     data class TypographyResult(val textSize: Float, val isSingleLine: Boolean)
 
-    fun calculateAdaptiveTypography(text: String, targetW: Int, targetH: Int): TypographyResult {
+    // 5. 核心排版引擎：解决中文字数保整、英文多行基准归一、底部防裁切
+    fun calculateAdaptiveTypography(text: String, targetW: Int, targetH: Int, originalLineCount: Int): TypographyResult {
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
-        val availW = (targetW - 10).coerceAtLeast(14)
-        val availH = (targetH - 6).coerceAtLeast(14)
+        val availW = (targetW - 12).coerceAtLeast(14)
+        // 底部预留 8px 安全呼吸区，彻底防止文字底部笔画被切除
+        val availH = (targetH - 8).coerceAtLeast(14)
 
-        // 黄金比例高度基准：单行文字的最佳视觉字号约为容器高度的 58% ~ 65%
-        val optimalHeightSize = targetH * 0.62f
-        paint.textSize = optimalHeightSize
-        val singleLineWidth = paint.measureText(text)
-
-        // 判断是否能优雅地放入单行
-        if (singleLineWidth <= availW) {
-            // 单行能够放下：锁定在最佳高度比，绝不无限制膨胀（解决真彩 vs 水蒸气字号不均问题）
-            val boundedSize = optimalHeightSize.coerceIn(9f, 60f)
-            return TypographyResult(boundedSize, true)
+        // 归一化基准单行高度：如果原英文是多行，按单行比例计算，防止卡片标题暴涨
+        val baseLineHeight = if (originalLineCount > 1) {
+            (targetH.toFloat() / originalLineCount).coerceAtLeast(24f)
+        } else {
+            targetH.toFloat()
         }
 
-        // 单行放不下：测试按宽度压小单行，看是否仍然足够清晰
-        val shrinkSingleSize = (availW / singleLineWidth) * optimalHeightSize
-        // 若容器很扁长（长宽比大）且单行压小后仍有一定可读性，优先保留单行
-        val isWide = (targetW.toFloat() / targetH) > 2.8f
-        if (isWide && shrinkSingleSize >= (targetH * 0.42f).coerceAtLeast(10f)) {
-            return TypographyResult(shrinkSingleSize.coerceIn(9f, 55f), true)
+        val charCount = text.length
+        val hasNoNewlines = !text.contains("\n")
+
+        // 规则 1：中文字数 <= 6（卡片标题、按钮、菜单），绝对强制单行！彻底消灭“图像生 / 成”
+        if (charCount <= 6 && hasNoNewlines) {
+            // 优雅的卡片标题字号上限：26px（防止大盒子出现巨型字体）
+            val targetSizeByHeight = (baseLineHeight * 0.65f).coerceIn(13f, 26f)
+            paint.textSize = targetSizeByHeight
+            val textWidth = paint.measureText(text)
+            val finalSize = if (textWidth > availW) {
+                // 宽度不够时平滑微缩，绝不折行
+                ((availW / textWidth) * targetSizeByHeight).coerceIn(10f, 26f)
+            } else {
+                targetSizeByHeight
+            }
+            return TypographyResult(finalSize, true)
         }
 
-        // 否则进入多行自适应：二分逼近查找排版最佳字号
-        var low = 8f  // 允许下潜到 8px，图表/极小标注永不溢出
-        var high = (targetH * 0.65f).coerceAtLeast(16f)
-        var best = 10f
+        // 规则 2：字数在 7~10 之间，先尝试以可读字号放入单行
+        if (charCount <= 10 && hasNoNewlines) {
+            val trySingleSize = (baseLineHeight * 0.58f).coerceIn(12f, 24f)
+            paint.textSize = trySingleSize
+            val w = paint.measureText(text)
+            if (w <= availW) {
+                return TypographyResult(trySingleSize, true)
+            }
+            // 挤一挤放入单行
+            val shrinkSize = (availW / w) * trySingleSize
+            if (shrinkSize >= 13f) {
+                return TypographyResult(shrinkSize, true)
+            }
+        }
 
-        while (high - low > 1.0f) {
+        // 规则 3：长段落多行排版（使用均衡折行算法，避免孤字与腰斩）
+        var low = 9f
+        var high = (baseLineHeight * 0.70f).coerceIn(15f, 32f)
+        var best = 11f
+
+        while (high - low > 0.8f) {
             val mid = (low + high) / 2f
             paint.textSize = mid
             val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 StaticLayout.Builder.obtain(text, 0, text.length, paint, availW)
-                    .setLineSpacing(1f, 1.05f)
+                    .setLineSpacing(0f, 1.05f)
                     .setIncludePad(false)
+                    .setBreakStrategy(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) LineBreaker.BREAK_STRATEGY_BALANCED else 2)
                     .build()
             } else {
                 @Suppress("DEPRECATION")
-                StaticLayout(text, paint, availW, Layout.Alignment.ALIGN_NORMAL, 1.05f, 1f, false)
+                StaticLayout(text, paint, availW, Layout.Alignment.ALIGN_NORMAL, 1.05f, 0f, false)
             }
+            // 严格检查高度和宽度，保留 descent 缓冲
             if (layout.height <= availH && layout.width <= availW) {
                 best = mid
                 low = mid
@@ -117,7 +144,7 @@ object TranslateEngine {
         return TypographyResult(best, false)
     }
 
-    // 6. 极速 Google 翻译
+    // 6. Google 翻译通道
     suspend fun googleTranslate(text: String): String = withContext(Dispatchers.IO) {
         try {
             val clean = text.replace("\n", " ").trim()

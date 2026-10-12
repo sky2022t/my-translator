@@ -134,22 +134,23 @@ class FloatingTranslateService : Service() {
 
         for (b in blocks) {
             val rawRect = b.boundingBox ?: continue
-            if (TranslateEngine.isGarbageNoise(b.text, rawRect)) continue
+            // 过滤无用杂质及底部地址栏
+            if (TranslateEngine.isGarbageNoise(b.text, rawRect, bmp.height)) continue
 
             var txt = TranslateEngine.googleTranslate(b.text)
             if (txt.isEmpty()) continue
 
-            // 1. 净化多余末尾句号标点
             val isShortUi = txt.length <= 15 && !txt.contains("\n")
             txt = TranslateEngine.cleanUiPunctuation(txt, isShortUi)
 
-            // 2. 形态学外扩（微调为完美包容比例）
-            val expX = (rawRect.height() * 0.12f).toInt().coerceIn(3, 8)
-            val expY = (rawRect.height() * 0.10f).toInt().coerceIn(2, 6)
+            // 1. 结构外扩：水平扩展 4~8px，顶部扩展 2~5px，底部额外增加 +4px 留出文字下潜安全区！
+            val expX = (rawRect.height() * 0.12f).toInt().coerceIn(4, 8)
+            val expY = (rawRect.height() * 0.08f).toInt().coerceIn(2, 5)
             val renderLeft = (rawRect.left - expX).coerceAtLeast(0)
             val renderTop = (rawRect.top - expY).coerceAtLeast(0)
             val renderRight = (rawRect.right + expX).coerceAtMost(bmp.width)
-            val renderBottom = (rawRect.bottom + expY).coerceAtMost(bmp.height)
+            // 底部多扩展 4px，彻底解决像“成”、“题”这类底部笔画被切掉的 BUG
+            val renderBottom = (rawRect.bottom + expY + 4).coerceAtMost(bmp.height)
             val finalWidth = renderRight - renderLeft
             val finalHeight = renderBottom - renderTop
             if (finalWidth <= 10 || finalHeight <= 8) continue
@@ -157,16 +158,13 @@ class FloatingTranslateService : Service() {
             val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rawRect)
             val tc = TranslateEngine.getHighContrastTextColor(bg)
 
-            // 3. 高级自适应排版测算
-            val typo = TranslateEngine.calculateAdaptiveTypography(txt, finalWidth, finalHeight)
+            // 2. 传入原文本行数，计算规整自适应字号
+            val originalLines = b.lines.size
+            val typo = TranslateEngine.calculateAdaptiveTypography(txt, finalWidth, finalHeight, originalLines)
 
-            // 4. 宽高比决定对齐：长宽比小于 3.5 或是短词，强制居中；宽长段落左对齐
-            val isPillOrButton = (finalWidth.toFloat() / finalHeight < 3.5f) || txt.length <= 7
-            val textGravity = if (isPillOrButton) Gravity.CENTER else (Gravity.START or Gravity.CENTER_VERTICAL)
-
-            // 5. 动态弹性内衬（避免把小字挤死）
-            val padH = (finalWidth * 0.04f).toInt().coerceIn(2, 8)
-            val padV = (finalHeight * 0.05f).toInt().coerceIn(1, 5)
+            // 3. 智能居中与对齐判定
+            val isButtonOrCard = (finalWidth.toFloat() / finalHeight < 3.8f) || txt.length <= 8
+            val textGravity = if (isButtonOrCard) Gravity.CENTER else (Gravity.START or Gravity.CENTER_VERTICAL)
 
             val tv = AppCompatTextView(this).apply {
                 text = txt
@@ -174,15 +172,17 @@ class FloatingTranslateService : Service() {
                 setTextSize(TypedValue.COMPLEX_UNIT_PX, typo.textSize)
                 includeFontPadding = false
                 paintFlags = paintFlags or Paint.SUBPIXEL_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG
+                gravity = textGravity
+                // 内衬：单行标题不设垂直 padding，让文字在中心自然伸展；多行段落设轻微内衬
                 if (typo.isSingleLine) {
                     maxLines = 1
+                    setPadding(4, 0, 4, 0)
                 } else {
-                    setLineSpacing(1f, 1.05f)
+                    setLineSpacing(0f, 1.05f)
+                    setPadding(6, 2, 6, 2)
                 }
-                gravity = textGravity
-                setPadding(padH, padV, padH, padV)
                 background = GradientDrawable().apply {
-                    cornerRadius = (finalHeight * 0.16f).coerceIn(3f, 8f)
+                    cornerRadius = (finalHeight * 0.14f).coerceIn(3f, 8f)
                     setColor(bg)
                 }
             }
