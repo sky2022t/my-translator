@@ -56,7 +56,7 @@ class FloatingTranslateService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(c)
         }
         val notif = NotificationCompat.Builder(this, cid)
-            .setContentTitle("小太阳翻译官已就绪 ☀️")
+            .setContentTitle("小太阳翻译官正在值班 ☀️")
             .setContentText("点击屏幕上的小太阳即可一键翻译")
             .setSmallIcon(android.R.drawable.ic_menu_search)
             .build()
@@ -131,30 +131,53 @@ class FloatingTranslateService : Service() {
         if (blocks.isEmpty()) { Toast.makeText(this, "未发现可翻译的文字", Toast.LENGTH_SHORT).show(); return }
         val c = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT); setOnClickListener { clear() } }
         overlay = c
+
         for (b in blocks) {
-            val rect = b.boundingBox ?: continue
-            if (rect.width() <= 15 || rect.height() <= 15) continue
+            val rawRect = b.boundingBox ?: continue
+            // 1. 过滤掉标点、单个符号、细长噪点线
+            if (TranslateEngine.isGarbageNoise(b.text, rawRect)) continue
+
             val txt = TranslateEngine.googleTranslate(b.text)
             if (txt.isEmpty()) continue
-            val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rect)
+
+            // 2. 形态学外扩（Dilation）：水平外延 6px，垂直外延 4px，彻底盖死英文边缘
+            val expX = (rawRect.height() * 0.15f).toInt().coerceIn(4, 10)
+            val expY = (rawRect.height() * 0.12f).toInt().coerceIn(3, 8)
+            val renderLeft = (rawRect.left - expX).coerceAtLeast(0)
+            val renderTop = (rawRect.top - expY).coerceAtLeast(0)
+            val renderRight = (rawRect.right + expX).coerceAtMost(bmp.width)
+            val renderBottom = (rawRect.bottom + expY).coerceAtMost(bmp.height)
+            val finalWidth = renderRight - renderLeft
+            val finalHeight = renderBottom - renderTop
+            if (finalWidth <= 10 || finalHeight <= 10) continue
+
+            val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rawRect)
             val tc = TranslateEngine.getHighContrastTextColor(bg)
 
-            // 1:1 原文字号物理锚定
-            val lineHeights = b.lines.mapNotNull { it.boundingBox?.height() }.filter { it > 0 }
-            val avgLineHeight = if (lineHeights.isNotEmpty()) lineHeights.average().toFloat() else rect.height().toFloat()
-            val matchedSize = (avgLineHeight * 0.72f).coerceIn(22f, 68f)
             val isSingle = b.lines.size <= 1
+            // 3. 最先进二分自适应字号
+            val bestSizePx = TranslateEngine.calculateBestTextSize(txt, finalWidth, finalHeight, isSingle)
 
             val tv = AppCompatTextView(this).apply {
-                text = txt; setTextColor(tc)
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, matchedSize)
-                setLineSpacing(4f, 1.15f)
-                gravity = if (isSingle) Gravity.CENTER else (Gravity.START or Gravity.TOP)
-                setPadding(8, 4, 8, 4)
-                background = GradientDrawable().apply { cornerRadius = 6f; setColor(bg) }
+                text = txt
+                setTextColor(tc)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, bestSizePx)
+                includeFontPadding = false // 消除系统自带多余字间距，精准对齐
+                if (!isSingle) setLineSpacing(2f, 1.1f)
+                gravity = if (isSingle) Gravity.CENTER else (Gravity.START or Gravity.CENTER_VERTICAL)
+                setPadding(6, 4, 6, 4)
+                background = GradientDrawable().apply {
+                    cornerRadius = 6f
+                    setColor(bg) // 100% 实心无痕补丁
+                }
             }
-            c.addView(tv, FrameLayout.LayoutParams(rect.width(), rect.height()).apply { leftMargin = rect.left; topMargin = rect.top })
+
+            c.addView(tv, FrameLayout.LayoutParams(finalWidth, finalHeight).apply {
+                leftMargin = renderLeft
+                topMargin = renderTop
+            })
         }
+
         val op = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
