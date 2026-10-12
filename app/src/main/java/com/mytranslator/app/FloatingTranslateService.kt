@@ -134,41 +134,56 @@ class FloatingTranslateService : Service() {
 
         for (b in blocks) {
             val rawRect = b.boundingBox ?: continue
-            // 1. 过滤掉标点、单个符号、细长噪点线
             if (TranslateEngine.isGarbageNoise(b.text, rawRect)) continue
 
-            val txt = TranslateEngine.googleTranslate(b.text)
+            var txt = TranslateEngine.googleTranslate(b.text)
             if (txt.isEmpty()) continue
 
-            // 2. 形态学外扩（Dilation）：水平外延 6px，垂直外延 4px，彻底盖死英文边缘
-            val expX = (rawRect.height() * 0.15f).toInt().coerceIn(4, 10)
-            val expY = (rawRect.height() * 0.12f).toInt().coerceIn(3, 8)
+            // 1. 净化多余末尾句号标点
+            val isShortUi = txt.length <= 15 && !txt.contains("\n")
+            txt = TranslateEngine.cleanUiPunctuation(txt, isShortUi)
+
+            // 2. 形态学外扩（微调为完美包容比例）
+            val expX = (rawRect.height() * 0.12f).toInt().coerceIn(3, 8)
+            val expY = (rawRect.height() * 0.10f).toInt().coerceIn(2, 6)
             val renderLeft = (rawRect.left - expX).coerceAtLeast(0)
             val renderTop = (rawRect.top - expY).coerceAtLeast(0)
             val renderRight = (rawRect.right + expX).coerceAtMost(bmp.width)
             val renderBottom = (rawRect.bottom + expY).coerceAtMost(bmp.height)
             val finalWidth = renderRight - renderLeft
             val finalHeight = renderBottom - renderTop
-            if (finalWidth <= 10 || finalHeight <= 10) continue
+            if (finalWidth <= 10 || finalHeight <= 8) continue
 
             val bg = TranslateEngine.extractSolidBackgroundColor(bmp, rawRect)
             val tc = TranslateEngine.getHighContrastTextColor(bg)
 
-            val isSingle = b.lines.size <= 1
-            // 3. 最先进二分自适应字号
-            val bestSizePx = TranslateEngine.calculateBestTextSize(txt, finalWidth, finalHeight, isSingle)
+            // 3. 高级自适应排版测算
+            val typo = TranslateEngine.calculateAdaptiveTypography(txt, finalWidth, finalHeight)
+
+            // 4. 宽高比决定对齐：长宽比小于 3.5 或是短词，强制居中；宽长段落左对齐
+            val isPillOrButton = (finalWidth.toFloat() / finalHeight < 3.5f) || txt.length <= 7
+            val textGravity = if (isPillOrButton) Gravity.CENTER else (Gravity.START or Gravity.CENTER_VERTICAL)
+
+            // 5. 动态弹性内衬（避免把小字挤死）
+            val padH = (finalWidth * 0.04f).toInt().coerceIn(2, 8)
+            val padV = (finalHeight * 0.05f).toInt().coerceIn(1, 5)
 
             val tv = AppCompatTextView(this).apply {
                 text = txt
                 setTextColor(tc)
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, bestSizePx)
-                includeFontPadding = false // 消除系统自带多余字间距，精准对齐
-                if (!isSingle) setLineSpacing(2f, 1.1f)
-                gravity = if (isSingle) Gravity.CENTER else (Gravity.START or Gravity.CENTER_VERTICAL)
-                setPadding(6, 4, 6, 4)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, typo.textSize)
+                includeFontPadding = false
+                paintFlags = paintFlags or Paint.SUBPIXEL_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG
+                if (typo.isSingleLine) {
+                    maxLines = 1
+                } else {
+                    setLineSpacing(1f, 1.05f)
+                }
+                gravity = textGravity
+                setPadding(padH, padV, padH, padV)
                 background = GradientDrawable().apply {
-                    cornerRadius = 6f
-                    setColor(bg) // 100% 实心无痕补丁
+                    cornerRadius = (finalHeight * 0.16f).coerceIn(3f, 8f)
+                    setColor(bg)
                 }
             }
 
