@@ -87,13 +87,11 @@ object TranslateEngine {
 
         // 规则 1：中文字数 <= 6（卡片标题、按钮、菜单），绝对强制单行！彻底消灭“图像生 / 成”
         if (charCount <= 6 && hasNoNewlines) {
-            // 优雅的卡片标题字号上限：26px（防止大盒子出现巨型字体）
             val targetSizeByHeight = (baseLineHeight * 0.65f).coerceIn(13f, 26f)
             paint.textSize = targetSizeByHeight
             val textWidth = paint.measureText(text)
             val finalSize = if (textWidth > availW) {
-                // 宽度不够时平滑微缩，绝不折行
-                ((availW / textWidth) * targetSizeByHeight).coerceIn(10f, 26f)
+                ((availW.toFloat() / textWidth) * targetSizeByHeight).coerceIn(10f, 26f)
             } else {
                 targetSizeByHeight
             }
@@ -108,8 +106,7 @@ object TranslateEngine {
             if (w <= availW) {
                 return TypographyResult(trySingleSize, true)
             }
-            // 挤一挤放入单行
-            val shrinkSize = (availW / w) * trySingleSize
+            val shrinkSize = (availW.toFloat() / w) * trySingleSize
             if (shrinkSize >= 13f) {
                 return TypographyResult(shrinkSize, true)
             }
@@ -127,13 +124,12 @@ object TranslateEngine {
                 StaticLayout.Builder.obtain(text, 0, text.length, paint, availW)
                     .setLineSpacing(0f, 1.05f)
                     .setIncludePad(false)
-                    .setBreakStrategy(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) LineBreaker.BREAK_STRATEGY_BALANCED else 2)
+                    .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED)
                     .build()
             } else {
                 @Suppress("DEPRECATION")
                 StaticLayout(text, paint, availW, Layout.Alignment.ALIGN_NORMAL, 1.05f, 0f, false)
             }
-            // 严格检查高度和宽度，保留 descent 缓冲
             if (layout.height <= availH && layout.width <= availW) {
                 best = mid
                 low = mid
