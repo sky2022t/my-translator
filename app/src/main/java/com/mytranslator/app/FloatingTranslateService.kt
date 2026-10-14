@@ -1,4 +1,7 @@
 package com.mytranslator.app
+import kotlin.math.hypot
+import android.os.SystemClock
+import android.view.MotionEvent
 import kotlin.math.abs
 import android.view.HapticFeedbackConstants
 
@@ -104,8 +107,15 @@ class FloatingTranslateService : Service() {
                     if (Math.abs(dx) > (18 * resources.displayMetrics.density) || Math.abs(dy) > (18 * resources.displayMetrics.density)) moved = true
                     p.x = sx + dx; p.y = sy + dy; wm.updateViewLayout(sunBtn, p); true
                 }
-                MotionEvent.ACTION_UP -> { if (!moved) capture(); true }
-                else -> false
+                MotionEvent.ACTION_UP -> {
+            if (!moved) {
+                try { sunBtn.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (e: Exception) {}
+                android.widget.Toast.makeText(this, "☀️ 正在识别并翻译屏幕...", android.widget.Toast.LENGTH_SHORT).show()
+                capture()
+            }
+            true
+        }
+        else -> false
             }
         }
         wm.addView(sunBtn, p)

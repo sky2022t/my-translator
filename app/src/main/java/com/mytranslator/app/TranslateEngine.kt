@@ -32,6 +32,7 @@ object TranslateEngine {
     var orbScale: Float = 1.0f
     var orbIdleAlpha: Float = 0.88f
     @Volatile var isTranslatingState: Boolean = false
+    var lastTranslateStartTime: Long = 0L
 
     data class HistoryItem(val original: String, val translated: String, val time: String)
     val historyList = CopyOnWriteArrayList<HistoryItem>()
