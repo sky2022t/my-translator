@@ -1,4 +1,6 @@
 package com.mytranslator.app
+import kotlin.math.abs
+import android.view.HapticFeedbackConstants
 
 import android.app.*
 import android.content.Context
@@ -99,7 +101,7 @@ class FloatingTranslateService : Service() {
                 MotionEvent.ACTION_DOWN -> { sx = p.x; sy = p.y; tx = e.rawX; ty = e.rawY; moved = false; true }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (e.rawX - tx).toInt(); val dy = (e.rawY - ty).toInt()
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true
+                    if (Math.abs(dx) > (18 * resources.displayMetrics.density) || Math.abs(dy) > (18 * resources.displayMetrics.density)) moved = true
                     p.x = sx + dx; p.y = sy + dy; wm.updateViewLayout(sunBtn, p); true
                 }
                 MotionEvent.ACTION_UP -> { if (!moved) capture(); true }

@@ -16,8 +16,24 @@ class SolarOrbDrawable : Drawable() {
     private val rectF = RectF()
     private var boostUntilMillis = 0L
 
+    // 关键：声明 56dp 物理尺寸（@3x 为 168px），防止 WRAP_CONTENT 导致尺寸塌陷成 0x0
+    override fun getIntrinsicWidth(): Int = 168
+    override fun getIntrinsicHeight(): Int = 168
+
+    // 采用标准 Handler 16ms 帧间隔调度，绝不在 draw() 内部死循环递归
+    private val frameRunnable = Runnable {
+        invalidateSelf()
+        scheduleNextFrame()
+    }
+
+    private fun scheduleNextFrame() {
+        unscheduleSelf(frameRunnable)
+        scheduleSelf(frameRunnable, SystemClock.uptimeMillis() + 16L)
+    }
+
     fun triggerPulseBoost() {
-        boostUntilMillis = SystemClock.uptimeMillis() + 1800L
+        boostUntilMillis = SystemClock.uptimeMillis() + 2000L
+        scheduleNextFrame()
         invalidateSelf()
     }
 
@@ -25,9 +41,11 @@ class SolarOrbDrawable : Drawable() {
         val b = bounds
         if (b.isEmpty) return
 
+        scheduleNextFrame()
+
         val now = SystemClock.uptimeMillis()
         val isBoost = TranslateEngine.isTranslatingState || now < boostUntilMillis
-        val speedMultiplier = if (isBoost) 3.6f else 1.0f
+        val speedMultiplier = if (isBoost) 3.5f else 1.0f
         val t = (now % 60000L) / 1000f * speedMultiplier
 
         val cx = b.exactCenterX()
@@ -35,7 +53,7 @@ class SolarOrbDrawable : Drawable() {
         val maxR = (b.width().coerceAtMost(b.height()) / 2f)
         val coreR = maxR * (0.50f + 0.03f * sin(t * 2.5f))
 
-        // 1. 外部深空暗色微光底座（增强在浅色背景下的对比度）
+        // 1. 深空微光对比底座
         paint.style = Paint.Style.FILL
         paint.shader = RadialGradient(
             cx, cy, maxR * 0.96f,
@@ -49,11 +67,11 @@ class SolarOrbDrawable : Drawable() {
         )
         canvas.drawCircle(cx, cy, maxR * 0.96f, paint)
 
-        // 2. 翻译状态能量扩散脉冲环
+        // 2. 能量脉冲环（点击与翻译中激活）
         if (isBoost) {
             val pulseProgress = ((now % 900L) / 900f)
             val pulseR = coreR + (maxR - coreR) * pulseProgress
-            val pulseAlpha = ((1f - pulseProgress) * 200).toInt().coerceIn(0, 255)
+            val pulseAlpha = ((1f - pulseProgress) * 220).toInt().coerceIn(0, 255)
             orbitPaint.shader = null
             orbitPaint.color = Color.argb(pulseAlpha, 56, 189, 248)
             orbitPaint.strokeWidth = 3.5f
@@ -73,7 +91,7 @@ class SolarOrbDrawable : Drawable() {
         )
         canvas.drawCircle(cx, cy, maxR * 0.85f, paint)
 
-        // 4. 绘制双倾角 3D 星轨后半环（Z < 0）
+        // 4. 双倾角 3D 星轨后半环
         drawOrbitLayer(canvas, cx, cy, maxR * 0.82f, maxR * 0.32f, -28f, t * 1.8f, isBackHalf = true)
         drawOrbitLayer(canvas, cx, cy, maxR * 0.74f, maxR * 0.26f, 32f, -t * 1.3f + 2.1f, isBackHalf = true)
 
@@ -102,12 +120,9 @@ class SolarOrbDrawable : Drawable() {
         )
         canvas.drawCircle(cx - coreR * 0.22f, cy - coreR * 0.22f, coreR * 0.45f, paint)
 
-        // 7. 绘制双倾角 3D 星轨前半环与环绕光子粒子（Z >= 0）
+        // 7. 双倾角 3D 星轨前半环与环绕光子粒子
         drawOrbitLayer(canvas, cx, cy, maxR * 0.82f, maxR * 0.32f, -28f, t * 1.8f, isBackHalf = false)
         drawOrbitLayer(canvas, cx, cy, maxR * 0.74f, maxR * 0.26f, 32f, -t * 1.3f + 2.1f, isBackHalf = false)
-
-        // 持续触发 60fps 帧动画
-        invalidateSelf()
     }
 
     private fun drawOrbitLayer(
@@ -129,7 +144,6 @@ class SolarOrbDrawable : Drawable() {
         val startAngle = if (isBackHalf) 180f else 0f
         canvas.drawArc(rectF, startAngle, 180f, false, orbitPaint)
 
-        // 计算轨道光子坐标
         val px = cx + rx * cos(angleRad)
         val py = cy + ry * sin(angleRad)
         val sinVal = sin(angleRad)
