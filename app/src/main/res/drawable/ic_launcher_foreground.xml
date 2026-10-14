@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 8道立体流光日冕棱镜光芒 -->
+    <path
+        android:fillColor="#FFA000"
+        android:pathData="M54,18 L58,28 L50,28 Z M54,90 L58,80 L50,80 Z M18,54 L28,58 L28,50 Z M90,54 L80,58 L80,50 Z M28.5,28.5 L37,33 L33,37 Z M79.5,79.5 L71,75 L75,71 Z M79.5,28.5 L75,37 L71,33 Z M28.5,79.5 L33,71 L37,75 Z"/>
+    <!-- 3D 星体椭圆星轨 -->
+    <path
+        android:strokeColor="#99FFE082"
+        android:strokeWidth="1.6"
+        android:pathData="M24,62 A32,12 0 1,0 84,46 A32,12 0 1,0 24,62 Z"/>
+    <!-- 3D 鎏金核心球体 -->
+    <path android:pathData="M54,54m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="47"
+                android:centerY="47"
+                android:gradientRadius="26"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#FFFDE7"/>
+                <item android:offset="0.35" android:color="#FFD54F"/>
+                <item android:offset="0.75" android:color="#FF8F00"/>
+                <item android:offset="1.0" android:color="#E65100"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 轨道高光卫星粒子 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,42m-2.8,0a2.8,2.8 0,1 1,5.6 0a2.8,2.8 0,1 1,-5.6 0"/>
+</vector>
